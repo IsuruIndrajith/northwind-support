@@ -27,6 +27,20 @@ public sealed class Agent : AggregateRoot
         CreatedAtUtc = createdAtUtc;
     }
 
+    public Agent(int id, string fullName, string email, int maxOpenTickets, DateTime createdAtUtc)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(fullName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(email);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxOpenTickets);
+
+        Id = id;
+        FullName = fullName;
+        Email = email;
+        IsActive = true;
+        MaxOpenTickets = maxOpenTickets;
+        CreatedAtUtc = createdAtUtc;
+    }
+
     public string FullName { get; private set; } = string.Empty;
 
     public string Email { get; private set; } = string.Empty;

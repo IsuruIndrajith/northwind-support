@@ -69,7 +69,9 @@ public class SearchTicketsQueryHandlerTests
             customer1.Id,
             categoryTechnical.Id,
             TicketPriority.High,
-            clock.UtcNow.AddDays(-2));
+            clock.UtcNow.AddDays(-2),
+            null, // assignedAgentId - will be assigned below
+            null); // dueAtUtc - will be calculated based on SLA if needed
 
         ticket1.AssignTo(agent1.Id, clock.UtcNow);
         ticket1.ChangeStatus(TicketStatus.InProgress, clock.UtcNow);
@@ -81,7 +83,9 @@ public class SearchTicketsQueryHandlerTests
             customer2.Id,
             categoryBilling.Id,
             TicketPriority.Medium,
-            clock.UtcNow.AddDays(-1));
+            clock.UtcNow.AddDays(-1),
+            null, // assignedAgentId - intentionally left null for unassigned ticket
+            null); // dueAtUtc - will be calculated based on SLA if needed
         // ticket2 remains unassigned (AssignedAgentId is null)
         ticket2.ChangeStatus(TicketStatus.Open, clock.UtcNow);
 
@@ -92,7 +96,9 @@ public class SearchTicketsQueryHandlerTests
             customer3.Id,
             categorySecurity.Id,
             TicketPriority.Critical,
-            clock.UtcNow);
+            clock.UtcNow,
+            null, // assignedAgentId - will be assigned below
+            null); // dueAtUtc - will be calculated based on SLA if needed
 
         ticket3.AssignTo(agent2.Id, clock.UtcNow);
         ticket3.ChangeStatus(TicketStatus.Open, clock.UtcNow);
@@ -291,7 +297,9 @@ public class SearchTicketsQueryHandlerTests
             customer1.Id,
             categoryTechnical.Id,
             TicketPriority.High,
-            clock.UtcNow.AddDays(-3)); // Older than TCK-0042 to ensure correct ordering
+            clock.UtcNow.AddDays(-3), // Older than TCK-0042 to ensure correct ordering
+            null, // assignedAgentId - will be assigned below
+            null); // dueAtUtc - will be calculated based on SLA if needed
 
         ticket4.AssignTo(agent1.Id, clock.UtcNow);
         ticket4.ChangeStatus(TicketStatus.InProgress, clock.UtcNow);

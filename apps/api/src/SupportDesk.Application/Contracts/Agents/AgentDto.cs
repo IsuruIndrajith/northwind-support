@@ -12,4 +12,5 @@ public sealed record AgentDto(
     bool IsActive,
     int MaxOpenTickets,
     int OpenTicketCount,
+    DateTime CreatedAtUtc,
     IReadOnlyList<CategorySummaryDto> Specializations);

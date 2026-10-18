@@ -178,7 +178,9 @@ public sealed class SupportDbSeeder(SupportDbContext db, IClock clock, ILogger<S
                 customers[row.CustomerIndex - 1].Id,
                 categories[row.CategoryIndex - 1].Id,
                 row.Priority,
-                createdAtUtc);
+                createdAtUtc,
+                null, // assignedAgentId - set separately below
+                null); // dueAtUtc - set separately below
 
             if (row.AgentIndex is not null)
             {
