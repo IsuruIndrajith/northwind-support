@@ -1,109 +1,82 @@
-# Northwind Support Desk
+# Northwind Support Desk: candidate submission - Isuru Edirisinghe
 
-A support ticket management system: raise tickets, search and filter them, assign them to agents,
-and move them through their lifecycle.
+## Status
 
-**.NET 10 Web API** + **React 19 / TypeScript** + **SQL Server**, in one monorepo.
+| Task | State |
+|---|---|
+| 1.1 Defect fix | Complete, with regression tests |
+| 1.2 Server-side filtering | Complete, with tests |
+| 2 Escalation and assignment | **Backend complete, with unit tests. Frontend not done** (SLA indicator, SLA filter in the UI, escalation panel, history, triage result) |
+| 3 Login and authentication | **Not started** |
+| 4 Dockerise the API | **Not started** |
 
----
+**Development login credentials: none.** Task 3 was not implemented, so the app and API have no login.
 
-## The assignment
+Run the project as described in the sections below (unchanged). Node 22 (`nvm use`) is required for the web tests.
 
-You are joining a team that already has this app working. Complete the tasks **in order**.
-Full requirements are in **[`ASSIGNMENT_CANDIDATE.md`](ASSIGNMENT_CANDIDATE.md)**.
+## What was implemented
 
-| # | Task | Done looks like | Effort |
-| --- | --- | --- | --- |
-| 1 | **Fix a defect, add server-side filtering** | Root cause fixed with a regression test; every list filter applied in the database with a correct count | ~2.5 h |
-| 2 | **Ticket escalation & assignment** | Automatic triage on create, escalation with history, SLA status, UI for all of it | ~7 h |
-| 3 | **Login and authentication** | Agents sign in; API rejects unauthenticated calls; login UI | ~4 h |
-| 4 | **Dockerise the API** *(optional)* | `docker compose up` gives a migrated, seeded API with no baked-in secret | ~1.5 h |
+### Task 1.1: DEFECT-117 (filters sometimes do not take effect)
+- **Root cause:** `useTicketList` fetched inside a `useEffect` whose dependency list was only `search`, `page` and `pageSize`. Changing status, priority, category, customer, agent, unassigned-only or sort updated state but never re-ran the effect, so no request was sent. Typing in search re-ran it and sent the current filters, which made the bug look like a stale value. An `eslint-disable` comment hid the lint warning that would have flagged it. The bug was masked when the page changed from 2+ to 1, because `page` is in the list and `updateFilters` resets it.
+- **Fix:** the loader is now a `useCallback` keyed on `filters`, and the effect depends on that loader, the same pattern `useTicket` already uses. The lint suppression is removed.
+- **Debounce:** TODO choose one. (a) All filters share the existing 300ms debounce, a known deviation from "immediate request" in the acceptance criteria. (b) Only search text is debounced and every other filter fetches immediately.
+- **Regression test:** `useTicketList.test.ts` runs one case per filter (status, priority, category, customer, agent, unassigned-only, sort). Each starts on page 1, changes one filter and asserts a second request carrying the new value. It failed on the original code and passes on the fix.
 
-### Guidance
+### Task 1.2: Server-side filtering
+- **Where:** `TicketQueries.ApplyFilters` in `SupportDesk.Infrastructure/Queries/TicketQueries.cs`. `GetPagedAsync` now does filter, then count, then sort, then skip/take.
+- **Rules:** exact match for status, priority, category, customer and assigned agent. `unassignedOnly` means no agent. `search` is trimmed, ignored when blank, and matches title, reference or customer name with `Contains`. All filters combine with AND.
+- **How the SQL was checked:** TODO describe what you did, e.g. EF command logging for one request, then paste the COUNT and the paged query (OFFSET/FETCH) here, and note that the WHERE appears in both.
+- **Adding the next filter:** add one `if` block in `ApplyFilters`.
+- **Tests:** `SearchTicketsQueryHandlerTests.cs` on in-memory SQLite: exact-match priority, combined filters, customer-name search (with padded spaces), unassigned-only, blank search, and counts and paging for a filtered set.
 
-- **Time: 2 days.** Honestly marking a task "not finished" beats rushing all of them.
-- **Fork** this repo to your own GitHub account and work there. **Do not push to the original.**
-- **AI tools are allowed.** You must understand and be able to defend every line you submit.
-- **Commit as you go** and keep the real history. Commit the Task 1 defect fix and the filtering
-  separately from each other and from the feature work. A single squashed commit is not accepted.
-- **Where the spec is ambiguous**, make a decision, write it down in the README, and move on.
-- **Out of scope:** registration, password reset, roles, OAuth/SSO, refresh tokens, MFA,
-  notifications, CI, caching, visual redesign. Mention them under *Known limitations* instead.
+### Task 2: Escalation and assignment (backend)
+Rules as I understood them:
+- **Priority:** requested priority, default Medium; categories flagged `ForcesCriticalPriority` are always Critical.
+- **SLA window:** Critical 4h, High 8h, Medium 24h, Low 72h. Premium customers get half, never below 1 hour. Windows, multiplier, floor and at-risk threshold come from the `Sla` configuration section, not code.
+- **Assignment:** eligible agents are active, specialised where the category requires it, and strictly below `MaxOpenTickets`. Open tickets are counted from the tickets (not Resolved or Closed). Fewest open wins, ties go to the lowest agent id. If nobody is eligible the ticket is still created (201), unassigned, with a reason in the `triage` object.
+- **Escalation:** `POST /api/tickets/{id}/escalate` raises priority exactly one level (the server decides). The due date is recomputed from the moment of escalation. The current agent is kept if still eligible, otherwise reassigned by the same selector. A reason of 5 to 500 characters is required. Each escalation writes an immutable history row, available from `GET /api/tickets/{id}/escalations` (newest first). Responses: 400 invalid reason or actor, 404 unknown ticket, 409 for Critical or Resolved/Closed with a message saying which.
+- **SLA status:** derived, never stored, with an injectable clock. TODO state your boundary choices, e.g. what `now == due` gives and what exactly 25% remaining gives.
+- **`slaStatus` filter:** one added block in `ApplyFilters`, done in SQL.
+- **Not built:** all Task 2 UI.
 
-### Submission
+## Design decisions
 
-1. Update this **README** with what you built, your design decisions (chosen, rejected and why),
-   the defect's root cause, dev login credentials, how to run and test it, AI usage, and known
-   limitations. A reviewer must be able to run it without asking you anything.
-2. Add an **APPROACH.md** explaining your approach and thought process for each task.
-3. Commit both, then send us the **link to your fork**, the **dev login credentials**, and a
-   **rough note of time spent** on what. (If the fork is private, add the reviewers as collaborators.)
+- **Rules live in small shared classes, not in handlers.** TODO list the real class names (window calculator, priority rule, agent selector, escalation rule, SLA evaluator). Create and Escalate call the same classes, so no rule exists twice, and they are tested with `FixedClock` without a database.
+- **Current agent on escalation:** when deciding whether the current agent is still eligible, this ticket is not counted against their open total, otherwise an agent exactly at their limit would be reassigned for no reason. Chosen because the ticket is already theirs.
+- **`Contains` instead of `EF.Functions.Like`:** EF handles `%` and `_` in user input safely.
+- **Conflicting filters:** `assignedAgentId` together with `unassignedOnly=true` returns nothing, because both conditions apply.
+- **SLA status is derived, not stored,** so it can never go stale when time passes. The cost is that the SQL form used by the filter must stay in step with `SlaEvaluator`.
+- **Considered and rejected:** rules inside the command handlers (duplicated across create and escalate); one query per agent for open counts (N+1); filtering in C# after the query (breaks paging and counts).
+- **Patterns used:** TODO confirm each matches your code. Repository and Unit of Work (existing), small policy/strategy-style rule classes, and the Options pattern for the `Sla` settings.
 
----
+## Database
 
-## Quick start
+- Task 2 adds the `TicketEscalations` table through a committed EF migration: ticket id (indexed foreign key), from/to priority, agent and due date, reason (500), escalated-by (100) and timestamp.
+- Index: TODO confirm. An index on `TicketId`, because history is always read per ticket.
+- Reads are `AsNoTracking`, projected narrowly, and filtering happens in SQL before paging.
 
-**Prerequisites:** .NET SDK 10 (`global.json`), Node.js 22 (`.nvmrc`; 20.19+ works), Docker.
+## Testing
 
-```bash
-cp .env.example .env          # optional, every value has a working default
-npm install                   # installs the web app
-npm run db:up                 # SQL Server 2022 in Docker on localhost:1433
-npm run api                   # terminal 1: migrates, seeds, then serves the API
-npm run web                   # terminal 2: React dev server
-```
+- Run everything with `npm test` (the .NET tests, then the web tests). Web tests need Node 22.
+- Covered: the 1.1 regression cases, the 1.2 filters and paging, and the Task 2 rules (TODO list: windows and floor, forced Critical, agent selection edge cases, escalation outcomes and rejections, SLA status boundaries).
+- Deliberately not covered: Task 2 frontend tests (UI not built), and tests against real SQL Server. Query tests use SQLite, which matches `Contains` case-sensitively while SQL Server's default collation does not. I checked behaviour against the running SQL Server manually.
 
-| What | Where |
-| --- | --- |
-| Web app | http://localhost:5173 |
-| API | https://localhost:7043 (also http://localhost:5043) |
-| Swagger | https://localhost:7043/swagger |
+## AI usage
 
-In Development the API applies migrations and seeds demo data on startup. **Never commit real
-credentials.**
+- **Tools:** Claude (chat) for orientation, debugging help, test design and reviewing output; Claude Code for implementing Task 2.
+- **A workflow that worked:** a step-by-step plan where the agent had to stop after each step, show test output and wait for approval. Reviewing its output against the spec table caught problems early.
+- **Accepted as-is:** TODO one concrete thing.
+- **Rejected or changed:**
+  - The first Claude Code attempt at Task 2 used `PATCH /escalation`, took the new priority from the caller, did not recompute the due date, did not reassign, and skipped triage on create. I rejected it and re-planned it step by step.
+  - A later version, by its own log, assigned an Outage ticket to a non-specialist and a ticket to an agent already at their limit, and its escalated due date appeared to be counted from creation rather than from the escalation. These were treated as defects to fix with tests.
+  - Chat advice first said a 300ms debounce on every filter was acceptable for 1.1. Re-reading the acceptance criteria ("immediate request") showed it was not, and it was corrected.
+- **Bugs AI introduced or helped find:** the specialist and capacity assignment errors above; AI also helped locate the `useEffect` dependency defect.
+- **How generated code was verified:** tests failing before the fix and passing after, generated SQL inspected, and manual checks through the UI, Swagger and curl on a freshly seeded database.
 
-**Visual Studio 2026:** run `npm run db:up`, open `SupportDesk.sln`, set
-**SupportDesk.Presentation** as the startup project, and press F5 on the **https** profile.
+## Known limitations
 
-## Tests
-
-```bash
-npm test                      # dotnet test, then the web tests (Vitest)
-```
-
-Both pass on a clean checkout and neither needs a database.
-
-## Commands
-
-| Command | What it does |
-| --- | --- |
-| `npm run db:up` / `db:down` / `db:reset` | Start / stop / wipe SQL Server |
-| `npm run api` / `npm run web` | Run the API / the React app |
-| `npm run build` | Build both |
-| `npm run lint` / `typecheck` / `format` | Web lint and types / `dotnet format` |
-| `npm run ef -- migrations add <Name>` | Add an EF Core migration |
-
-## API at a glance
-
-| Endpoint | Description |
-| --- | --- |
-| `GET /api/tickets` | Paged list with `search`, `status`, `priority`, `categoryId`, `customerId`, `assignedAgentId`, `unassignedOnly`, `sortBy`, `sortDirection`. **Filters are accepted but not applied yet** (Task 1). |
-| `GET /api/tickets/{id}` | One ticket |
-| `POST /api/tickets` | Create a ticket |
-| `PATCH /api/tickets/{id}/status` · `/assignment` | Change status / assignee |
-| `GET /api/customers` · `/api/agents` · `/api/categories` | Reference data |
-
-Errors are `ProblemDetails`: `400` validation, `404` not found, `409` conflict or business rule.
-
-**Seed data:** 5 categories, 6 customers (3 Premium), 6 agents (one inactive, one at their limit)
-and 40 tickets across every status, priority and SLA state.
-
-## Troubleshooting
-
-| Symptom | Fix |
-| --- | --- |
-| API cannot reach the database | `npm run db:up`, wait ~20 s, check `docker compose ps` |
-| Port 1433 already in use | Change the port in `docker-compose.yml` and `.env` |
-| Browser warns about the certificate | `dotnet dev-certs https --trust`, or use the web app, which proxies |
-| Web app shows "Unable to load tickets" | The API is not running, or `VITE_API_PROXY_TARGET` points at the wrong port |
-| SQL Server slow on Apple Silicon | Enable Rosetta in Docker Desktop → Settings → General |
+- Tasks 2 (frontend), 3 and 4 are not done. With no authentication, anyone who can reach the API can read and write, and `escalatedBy` is a free-text value in the request body until Task 3 replaces it with the signed-in agent.
+- Search uses a leading-wildcard `Contains`, which cannot use an index. At 10 million tickets I would use SQL Server full-text search or a dedicated search index.
+- The SQL form of the `slaStatus` filter has to be kept in step with `SlaEvaluator` by hand.
+- TODO remove if you shipped the search-only debounce: dropdown filters share the 300ms debounce, so they are not instantaneous.
+- `dotnet` restore reports NU1902/NU1903 vulnerability warnings for `System.Security.Cryptography.Pkcs` 9.0.11 (already present before my changes). I did not change package versions.
