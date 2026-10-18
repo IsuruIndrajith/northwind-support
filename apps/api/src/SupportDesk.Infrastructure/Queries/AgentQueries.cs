@@ -25,6 +25,7 @@ public sealed class AgentQueries(SupportDbContext db) : IAgentQueries
                     t.AssignedAgentId == a.Id &&
                     t.Status != TicketStatus.Resolved &&
                     t.Status != TicketStatus.Closed),
+                a.CreatedAtUtc,
                 (from specialization in a.Specializations
                  join category in db.Set<Category>() on specialization.CategoryId equals category.Id
                  select new CategorySummaryDto(category.Id, category.Name))

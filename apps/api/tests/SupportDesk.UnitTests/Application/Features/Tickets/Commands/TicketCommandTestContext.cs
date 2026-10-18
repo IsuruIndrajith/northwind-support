@@ -5,7 +5,11 @@ using SupportDesk.Application.Features.Tickets.Commands.AssignTicket;
 using SupportDesk.Application.Features.Tickets.Commands.ChangeTicketStatus;
 using SupportDesk.Application.Features.Tickets.Commands.RaiseTicket;
 using SupportDesk.Application.Features.Tickets.Queries.GetTicket;
+using SupportDesk.Application.Contracts.Agents;
+using SupportDesk.Application.Contracts.Tickets;
+using SupportDesk.Application.Abstractions;
 using SupportDesk.Domain.Aggregates.Agents;
+using SupportDesk.Domain.Aggregates.Categories;
 using SupportDesk.Domain.Aggregates.Customers;
 using SupportDesk.Domain.Aggregates.Tickets;
 using SupportDesk.Domain.Repositories;
@@ -23,9 +27,13 @@ internal sealed class TicketCommandTestContext
     {
         Customers.Setup(c => c.ExistsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
+        Customers.Setup(c => c.GetAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Customer("Contoso Ltd", "support@contoso.example", "555-0001", CustomerTier.Premium, FixedClock.DefaultNow));
 
         Categories.Setup(c => c.ExistsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
+        Categories.Setup(c => c.GetAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Category("General", false, false));
 
         Tickets.Setup(t => t.NextReferenceAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync("TCK-0041");
@@ -45,9 +53,70 @@ internal sealed class TicketCommandTestContext
             });
 
         var getTicket = new GetTicketQueryHandler(TicketQueries.Object);
+        var slaWindowCalculator = new SlaWindowCalculator(
+            new Dictionary<TicketPriority, int>
+            {
+                [TicketPriority.Low] = 72,
+                [TicketPriority.Medium] = 24,
+                [TicketPriority.High] = 8,
+                [TicketPriority.Critical] = 4
+            },
+            0.5, // PremiumCustomerMultiplier
+            1.0  // MinimumWindowHours
+        );
+        var priorityResolver = new PriorityResolver();
+        var agentSelector = new AgentSelector();
+
+        // Set up agent repository to return test data for AssignTicketCommandHandler
+        var agent1 = new Agent("Alex Turner", "alex@example.com", 10, FixedClock.DefaultNow);
+        var agent2 = new Agent("Ben Osei", "ben@example.com", 8, FixedClock.DefaultNow);
+        var agent3 = new Agent("Priya Nair", "priya@example.com", 8, FixedClock.DefaultNow);
+
+        Agents.Setup(a => a.GetByIdAsync(1, It.IsAny<CancellationToken>())).ReturnsAsync(agent1);
+        Agents.Setup(a => a.GetByIdAsync(2, It.IsAny<CancellationToken>())).ReturnsAsync(agent2);
+        Agents.Setup(a => a.GetByIdAsync(3, It.IsAny<CancellationToken>())).ReturnsAsync(agent3);
+
+        // Set up agent queries to return test data for RaiseTicketCommandHandler
+        var agentDtos = new List<AgentDto>
+        {
+            new AgentDto(
+                1,
+                "Alex Turner",
+                "alex@example.com",
+                true,
+                10,
+                0,
+                FixedClock.DefaultNow,
+                new List<CategorySummaryDto>()
+            ),
+            new AgentDto(
+                2,
+                "Ben Osei",
+                "ben@example.com",
+                true,
+                8,
+                0,
+                FixedClock.DefaultNow,
+                new List<CategorySummaryDto>()
+            ),
+            new AgentDto(
+                3,
+                "Priya Nair",
+                "priya@example.com",
+                true,
+                8,
+                0,
+                FixedClock.DefaultNow,
+                new List<CategorySummaryDto>()
+            )
+        };
+
+        AgentQueries.Setup(a => a.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(agentDtos);
 
         RaiseTicket = new RaiseTicketCommandHandler(
-            Tickets.Object, Customers.Object, Categories.Object, UnitOfWork.Object, Clock, getTicket,
+            Tickets.Object, Customers.Object, Categories.Object, AgentQueries.Object, UnitOfWork.Object, Clock, getTicket,
+            slaWindowCalculator, priorityResolver, agentSelector,
             NullLogger<RaiseTicketCommandHandler>.Instance);
 
         ChangeTicketStatus = new ChangeTicketStatusCommandHandler(Tickets.Object, UnitOfWork.Object, Clock, getTicket);
@@ -64,6 +133,7 @@ internal sealed class TicketCommandTestContext
     public Mock<ICategoryRepository> Categories { get; } = new();
 
     public Mock<IAgentRepository> Agents { get; } = new();
+    public Mock<IAgentQueries> AgentQueries { get; } = new();
 
     public Mock<IUnitOfWork> UnitOfWork { get; } = new();
 
@@ -91,13 +161,11 @@ internal sealed class TicketCommandTestContext
 
     public void ExistingAgent(int id, string fullName = "Alex Turner", bool isActive = true)
     {
-        var agent = new Agent(fullName, $"agent{id}@example.com", maxOpenTickets: 10, Clock.UtcNow);
-
+        var agent = new Agent(fullName, $"agent{id}@example.com", 10, FixedClock.DefaultNow);
         if (!isActive)
         {
             agent.Deactivate();
         }
-
         Agents.Setup(a => a.GetByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(agent);
     }
 

@@ -6,6 +6,7 @@ using SupportDesk.Application.Exceptions;
 using SupportDesk.Application.Features.Tickets.Queries.GetTicket;
 using SupportDesk.Domain.Aggregates.Agents;
 using SupportDesk.Domain.Aggregates.Categories;
+using SupportDesk.Domain.Aggregates.Customers;
 using SupportDesk.Domain.Aggregates.Tickets;
 using SupportDesk.Domain.Repositories;
 
@@ -57,16 +58,13 @@ public sealed class RaiseTicketCommandHandler(
         // Select an agent using the agent selector (BR-4, BR-5)
         var (assignedAgentId, assignmentReason) = agentSelector.SelectAgent(
             agentDtos.Select(dto => new Agent(
+                dto.Id,
                 dto.FullName,
                 dto.Email,
                 dto.MaxOpenTickets,
-                dto.CreatedAtUtc)
-            {
-                Id = dto.Id
-            }).ToList(),
+                dto.CreatedAtUtc)).ToList(),
             category,
-            agent =>
-            {
+            agent => {
                 // Find the corresponding DTO to get the open ticket count
                 var dto = agentDtos.FirstOrDefault(a => a.Id == agent.Id);
                 return dto?.OpenTicketCount ?? 0;
@@ -99,7 +97,7 @@ public sealed class RaiseTicketCommandHandler(
             PriorityReason = request.RequestedPriority.HasValue
                 ? $"Priority set to {request.RequestedPriority.Value} as requested"
                 : "Priority defaulted to Medium",
-            SlaWindowReason = customer.IsPremium
+            SlaWindowReason = (customer.Tier == CustomerTier.Premium)
                 ? $"Premium customer receives 50% of standard window (minimum 1 hour)"
                 : "Standard SLA window applied",
             AssignmentReason = assignmentReason

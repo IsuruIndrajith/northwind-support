@@ -13,7 +13,9 @@ public class TicketTests
     {
         var ticket = Ticket.Raise(
             "TCK-0041", "  Cannot log in  ", "  Happens for every user.  ", 1, 3,
-            TicketPriority.High, FixedClock.DefaultNow);
+            TicketPriority.High, FixedClock.DefaultNow,
+            null, // assignedAgentId
+            null); // dueAtUtc
 
         Assert.Equal(TicketStatus.New, ticket.Status);
         Assert.Equal("Cannot log in", ticket.Title);

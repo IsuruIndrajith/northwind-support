@@ -55,7 +55,9 @@ public sealed class TicketBuilder
             customerId: 1,
             categoryId: 1,
             _priority,
-            FixedClock.DefaultNow);
+            FixedClock.DefaultNow,
+            _assignedAgentId,
+            null); // dueAtUtc - will be set based on SLA rules if needed in tests
 
         if (_assignedAgentId is not null)
         {
